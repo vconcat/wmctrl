@@ -1,0 +1,35 @@
+project_name: wmctrl
+release:
+  github:
+    owner: vconcat
+    name: wmctrl
+before:
+  hooks:
+    - go mod download
+builds:
+  - main: .
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
+    mod_timestamp: '{{ .CommitTimestamp }}'
+    flags:
+      - -trimpath
+archives:
+  - replacements:
+      windows: Windows
+      386: i386
+      amd64: x86_64
+    name_template: "{{ .ProjectName }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+       - README.md
+       - LICENSE
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Tag }}_checksums.txt"
+snapshot:
+  name_template: "{{ .Tag }}-{{ .ShortCommit }}"
