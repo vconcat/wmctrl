@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -60,7 +59,7 @@ func main() {
 	}
 
 	if err := app.Run(os.Args); err != nil {
-		log.Fatalln(err)
+		fmt.Fprintln(os.Stderr, err)
 	}
 }
 
@@ -159,8 +158,19 @@ func switchToWindow(c *cli.Context) (err error) {
 		}
 		hwnd = uintptr(h)
 	} else {
-		// TODO: find window by value
-		hwnd = 0
+		param := &enumWindowsParam{
+			Title: value,
+		}
+		r1, _, e1 := procEnumWindows.Call(windows.NewCallback(listWindowsCallback), uintptr(unsafe.Pointer(param)))
+		rv := uint32(r1)
+		if rv != 1 {
+			err = e1
+			return
+		}
+		if len(param.Windows) == 0 {
+			return fmt.Errorf("can not find window with title contains: %s", value)
+		}
+		hwnd = uintptr(param.Windows[0].HWND)
 	}
 	r1, _, e1 := procSwitchToThisWindow.Call(hwnd)
 	rv := int32(r1)
