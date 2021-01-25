@@ -20,6 +20,14 @@ var (
 	procGetWindowTextW           = moduser32.NewProc("GetWindowTextW")
 	procGetWindowThreadProcessId = moduser32.NewProc("GetWindowThreadProcessId")
 	procSwitchToThisWindow       = moduser32.NewProc("SwitchToThisWindow")
+	procShowWindow               = moduser32.NewProc("ShowWindow")
+)
+
+const (
+	SW_SHOWNORMAL  = 1
+	SW_SHOW        = 5
+	SW_RESTORE     = 9
+	SW_SHOWDEFAULT = 10
 )
 
 func main() {
@@ -32,7 +40,7 @@ func main() {
 				Name: "l",
 			},
 			&cli.BoolFlag{
-				Name: "lp",
+				Name: "p",
 			},
 			&cli.StringFlag{
 				Name: "a",
@@ -40,13 +48,17 @@ func main() {
 			&cli.BoolFlag{
 				Name: "i",
 			},
+			&cli.IntFlag{
+				Name:  "show",
+				Value: SW_RESTORE,
+			},
 		},
 		Action: func(c *cli.Context) (err error) {
 			if c.Bool("m") {
 				fmt.Println("Name: win-dwm")
 				return
 			}
-			if c.Bool("l") || c.Bool("lp") {
+			if c.Bool("l") {
 				err = listWindows(c)
 				return
 			}
@@ -65,14 +77,15 @@ func main() {
 
 type windowInfo struct {
 	HWND    windows.HWND
-	Desktop int64
+	Desktop int64 // TODO: obtain deskop index
 	PID     uint64
 	Host    string
 	Title   string
 }
 
 type enumWindowsParam struct {
-	Title      string
+	ByTitle    string
+	ByPID      uint64
 	IncludePID bool
 	Windows    []*windowInfo
 }
@@ -103,8 +116,8 @@ func listWindowsCallback(hwnd windows.HWND, lparam uintptr) uintptr {
 		return 1
 	}
 	title := windows.UTF16ToString(buf)
-	if title != "" && param.Title != "" {
-		if !strings.Contains(title, param.Title) {
+	if title != "" && param.ByTitle != "" {
+		if !strings.Contains(title, param.ByTitle) {
 			return 1
 		}
 	}
@@ -112,17 +125,29 @@ func listWindowsCallback(hwnd windows.HWND, lparam uintptr) uintptr {
 		HWND:  hwnd,
 		Title: title,
 	}
-	if param.IncludePID {
-		var pid uint64
-		procGetWindowThreadProcessId.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&pid)))
-		info.PID = pid
+	if param.IncludePID || param.ByPID > 0 {
+		var tid uint64
+		r1, _, e1 = procGetWindowThreadProcessId.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&tid)))
+		if e1 != nil {
+			if errno, ok := e1.(syscall.Errno); ok {
+				if errno != 0 {
+					return 0
+				}
+			}
+		}
+		// FIXME: weird
+		// pid := uint64(r1)
+		if param.ByPID > 0 && tid != param.ByPID {
+			return 1
+		}
+		info.PID = tid
 	}
 	param.Windows = append(param.Windows, info)
 	return 1
 }
 
 func listWindows(c *cli.Context) (err error) {
-	includePID := c.Bool("lp")
+	includePID := c.Bool("p")
 	param := &enumWindowsParam{
 		IncludePID: includePID,
 	}
@@ -149,8 +174,7 @@ func listWindows(c *cli.Context) (err error) {
 func switchToWindow(c *cli.Context) (err error) {
 	var hwnd uintptr
 	value := c.String("a")
-	isNumeric := c.Bool("i")
-	if isNumeric {
+	if c.Bool("i") {
 		var h uint64
 		h, err = strconv.ParseUint(value, 0, 64)
 		if err != nil {
@@ -158,8 +182,16 @@ func switchToWindow(c *cli.Context) (err error) {
 		}
 		hwnd = uintptr(h)
 	} else {
-		param := &enumWindowsParam{
-			Title: value,
+		param := &enumWindowsParam{}
+		if c.Bool("p") {
+			var pid uint64
+			pid, err = strconv.ParseUint(value, 0, 64)
+			if err != nil {
+				return
+			}
+			param.ByPID = pid
+		} else {
+			param.ByTitle = value
 		}
 		r1, _, e1 := procEnumWindows.Call(windows.NewCallback(listWindowsCallback), uintptr(unsafe.Pointer(param)))
 		rv := uint32(r1)
@@ -176,6 +208,9 @@ func switchToWindow(c *cli.Context) (err error) {
 	rv := int32(r1)
 	if rv != 1 {
 		err = e1
+		return
 	}
+	show := c.Int("show")
+	procShowWindow.Call(hwnd, uintptr(show))
 	return
 }
